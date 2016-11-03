@@ -54,12 +54,12 @@ module Types
   include Dry::Types.module
 end
 
-class Category < Dry::Struct::Value
+class Category < Dry::Struct
   attribute :id, Types::Strict::Int
   attribute :name, Types::Strict::String
 end
 
-class Article < Dry::Struct::Value
+class Article < Dry::Struct
   attribute :id, Types::Strict::Int
   attribute :title, Types::Strict::String
   attribute :published, Types::Strict::Bool
@@ -88,3 +88,49 @@ module Repositories
     end
   end
 end
+
+config = ROM::Configuration.new(:sql, 'sqlite::memory')
+config.register_relation Relations::Articles
+config.register_relation Relations::Categories
+config.register_relation Relations::ArticlesCategories
+container = ROM.container(config)
+
+container.gateways[:default].tap do |gateway|
+  migration = gateway.migration do
+    change do
+      create_table :articles do
+        primary_key :id
+        string :title, null: false
+        boolean :published, null: false, default: false
+      end
+
+      create_table :categories do
+        primary_key :id
+        string :name
+      end
+
+      create_table :articles_categories do
+        primary_key :id
+        foreign_key :article_id, :articles, null: false
+        foreign_key :category_id, :categories, null: false
+      end
+    end
+  end
+
+  migration.apply gateway.connection, :up
+end
+
+repo = Repositories::Articles.new(container)
+
+repo.create(title: 'Conversational rom-rb', published: true)
+connection = container.gateways[:default].connection
+connection.execute "INSERT INTO categories (name) VALUES ('dry-rb')"
+connection.execute "INSERT INTO categories (name) VALUES ('rom-rb')"
+connection.execute 'INSERT INTO articles_categories (article_id, category_id) VALUES (1, 1)'
+connection.execute 'INSERT INTO articles_categories (article_id, category_id) VALUES (1, 2)'
+
+require 'ap'
+
+p 'Published articles'
+published = repo.published
+ap published.first.categories.inspect
